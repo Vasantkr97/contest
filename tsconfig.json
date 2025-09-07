@@ -2,14 +2,19 @@
   "compilerOptions": {
     "target": "ESNext",
     "module": "ESNext",
-    "moduleResolution": "Node",
+    "moduleResolution": "Bundler",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "types": ["bun-types"]
+    "types": ["bun-types"],
+    "baseUrl": ".",
+    "paths": {
+      "@contest/engine": ["apps/engine/src/index.ts"],
+      "@contest/engine/*": ["apps/engine/src/*"]
+    }
   },
   "exclude": ["node_modules"],
   "include": []

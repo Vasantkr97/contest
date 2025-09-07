@@ -1,0 +1,59 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(uuid())
+  userId        String   @unique
+  existingOrder    ExistingOrder[]
+  createdAt     DateTime @default(now())
+}
+
+model Asset {
+  id            String   @id @default(uuid())
+  symbol        String   @unique
+  existingOrder   ExistingOrder[]   
+  createdAt     DateTime @default(now())
+}
+
+model ExistingOrder {
+  id            String    @id @default(uuid())
+  OrderId       String    @unique
+
+  userId        String
+  user          User      @relation(fields: [userId], references: [id])
+
+  assetId       String
+  asset         Asset     @relation(fields: [assetId], references: [id])
+
+  side          Side
+  amount        Float
+  price         Float
+  status        Status
+  timestamp     BigInt
+  requiredMargin Float
+  availableBalance Float
+
+  createdAt     DateTime  @default(now())
+}
+
+enum Side {
+  BUY
+  SELL
+}
+
+enum Status {
+  SUCCESSFULL
+  CANCELLED
+}

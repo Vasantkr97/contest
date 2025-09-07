@@ -2,10 +2,10 @@
   "name": "contest",
   "private": true,
   "scripts": {
-    "build:redis": "cd packages/redis && bun run build",
+    "build:engine": "cd apps/engine && bun run build",
     "build:ws": "cd apps/ws && bun run build",
     "build:backend": "cd apps/backend && bun run build",
-    "dev:redis": "cd packages/redis && bun run dev",
+    "dev:engine": "cd apps/engine && bun run dev",
     "dev:ws": "cd apps/ws && bun run dev",
     "dev:backend": "cd apps/backend && bun run dev",
     "lint": "turbo run lint",
@@ -18,6 +18,7 @@
     "eslint": "^9.34.0",
     "jsonwebtoken": "^9.0.2",
     "prettier": "^3.6.2",
+    "prisma": "^6.15.0",
     "turbo": "^2.5.6",
     "typescript": "^5.9.2"
   },
