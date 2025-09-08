@@ -2,16 +2,21 @@
 import { getRedisClient, type RedisClientType } from "@contest/redis-client";
 import type { Order, UserBalance, PriceData, BackpackTickerData, OrderRequest, OrderConfirmation } from "@contest/types";
 import { CONFIG } from "@contest/types";
-import { stringWidth } from "bun";
+
 
 let redis: RedisClientType | null = null;
 
-const state = {
+export const state = {
     orders: new Map<string, Order>(),
     userBalances: new Map<string, UserBalance>(),
     prices: new Map<string, PriceData>(),
     userOrders: new Map<string, Set<string>>(),
+    lastProcessedId: "$",
 };
+
+const SNAPSHOT_KEY = "engine:snapshot:latest";
+const SNAPSHOT_BACKUP_KEY = "engine:snapshot:backup";
+const SNAPsHOT_TTL = 300; 
 
 const initializeRedis = async () => {
     redis = await getRedisClient();
@@ -26,27 +31,6 @@ const getCurrentPrice = (symbol: string): number => {
     return priceData ? priceData.price : 0
 }
 
-const initializeUserBalance = (userId: string): void => {
-    if (!state.userBalances.has(userId)) {
-        const userBalance: UserBalance ={
-            userId,
-            balances: {
-                "USDC": {
-                    id: `balance_${userId}_USDC`,
-                    userId,
-                    asset: "USDC",
-                    available: 10000,
-                    locked: 0,
-                    total: 10000,
-                    updated_at: Date.now()
-                }
-            }
-        };
-
-        state.userBalances.set(userId, userBalance);
-        console.log(`Initialized user ${userId} with $10000 USDC`);
-    }
-}
 
 export const updatePriceData = (tickerData: BackpackTickerData): void => {
     const td: any = tickerData as any;
@@ -68,11 +52,8 @@ export const updatePriceData = (tickerData: BackpackTickerData): void => {
     state.prices.set(symbol, priceData);
 };
 
-
 export const placeOrder = async (orderRequest: OrderRequest, OrderId: string): Promise<OrderConfirmation | null> => {
     const { userId, symbol, side, amount, leverage } = orderRequest;
-
-    initializeUserBalance(userId);
 
     const currentPrice = getCurrentPrice(symbol);
 
@@ -88,7 +69,7 @@ export const placeOrder = async (orderRequest: OrderRequest, OrderId: string): P
                 side,
                 amount,
                 price: 0,
-                status: "cancelled",
+                status: "CANCELLED",
                 timestamp: Date.now(),
                 requiredMargin: 0,
                 availableBalance: earlyUsdcBalance?.available ?? 0,
@@ -117,7 +98,7 @@ export const placeOrder = async (orderRequest: OrderRequest, OrderId: string): P
                 side,
                 amount,
                 price: 0,
-                status: "cancelled",
+                status: "CANCELLED",
                 timestamp: Date.now(),
                 requiredMargin: 0,
                 availableBalance: usdcBalance?.available ?? 0,
@@ -139,7 +120,7 @@ export const placeOrder = async (orderRequest: OrderRequest, OrderId: string): P
         amount,
         price: currentPrice,
         leverage,
-        status: 'successfull',
+        status: 'SUCCESSFULL',
         timestamp: Date.now(),
         updatedAt: Date.now(),
     }
@@ -149,10 +130,16 @@ export const placeOrder = async (orderRequest: OrderRequest, OrderId: string): P
     if (!state.userOrders.has(userId)) state.userOrders.set(userId, new Set());
     state.userOrders.get(userId)!.add(OrderId);
 
+    const userOrdersIds = state.userOrders.get(userId)!;
+    const userOrders = [...userOrdersIds].map(id => state.orders.get(id))
+    console.log(`📦 Orders for user ${userId}:`, JSON.stringify(userOrders, null, 2));
+
     // Deduct required margin
     usdcBalance.available -= requiredMargin;
     usdcBalance.locked = (usdcBalance.locked || 0) + requiredMargin;
     usdcBalance.updated_at = Date.now();
+
+    await persistUserBalance(userId);
 
     const confirmation: OrderConfirmation = {
         OrderId,
@@ -161,7 +148,7 @@ export const placeOrder = async (orderRequest: OrderRequest, OrderId: string): P
         side,
         amount,
         price: currentPrice,
-        status: 'successfull',
+        status: 'SUCCESSFULL',
         timestamp: order.timestamp,
         requiredMargin,
         availableBalance: usdcBalance.available
@@ -215,6 +202,118 @@ export const closeOrderEngine = async ( data: {userId: string, OrderId: string},
     // };
     const requiredMargin = (order.amount*order.price)/(order.leverage || 1);
 
-    const direction = order.side === "buy" ? 1 : -1;
+    const direction = order.side === "BUY" ? 1 : -1;
+    const pnl = (closePrice - order.price)*order.amount*direction;
 
+    const userBalance = state.userBalances.get(userId);
+    const usdcBalance = userBalance?.balances["USDC"];
+
+    if (usdcBalance) {
+        usdcBalance.locked = Math.max(0, usdcBalance.locked-requiredMargin);
+
+        usdcBalance.available += requiredMargin + pnl;
+        usdcBalance.total = usdcBalance.available + usdcBalance.locked;
+        usdcBalance.updated_at = Date.now();
+    };
+
+    order.status = "CLOSED"
+    order.updatedAt = Date.now();
+    state.orders.set(OrderId, order);
+
+    const userOrdersIds = state.userOrders.get(userId)!;
+    const userOrders = [...userOrdersIds].map(id => state.orders.get(id))
+    console.log(`📦 Orders for user ${userId}:`, JSON.stringify(userOrders, null, 2));
+    await persistUserBalance(userId);
+
+    const confirmation = {
+        OrderId: closeRequestId,
+        userId,
+        symbol: order.symbol,
+        side: order.side,
+        amount: order.amount,
+        entryPrice: order.price,
+        closePrice,
+        pnl,
+        status: "closed",
+        timestamp: Date.now(),
+        releasedMargin: requiredMargin,
+        availableBalance: usdcBalance?.available ?? 0,
+    };
+
+    if (redis) {
+        await redis.xAdd(CONFIG.CONSUMER_KEY, "*", {
+            data: JSON.stringify(confirmation),
+        })
+    };
+
+    console.log(
+        `✅ Order ${OrderId} marked CLOSED for user ${userId}. Entry: ${order.price}, Close: ${closePrice}, PnL: ${pnl.toFixed(
+            6
+        )}`
+    );
+
+};
+
+export const persistUserBalance = async (userId: string): Promise<void> => {
+    const balance = state.userBalances.get(userId);
+    console.log("Print balance:",balance)
+    if (!balance) return;
+
+    const key = `balance:${userId}`;
+    const usdc = balance.balances["USDC"];
+
+    await redis?.hSet(key, {
+        asset: usdc.asset,
+        available: usdc.available.toString(),
+        locked: usdc.locked.toString(),
+        total: usdc.total.toString(),
+        updated_at: usdc.updated_at.toString(),
+    })
+
+};
+
+export const depositToUserBalance = async (userId: string, amount: number): Promise<{ success: boolean, balance?: UserBalance, error?: string}> =>{
+    //initializing if user not exists
+    if (!state.userBalances.has(userId)) {
+        const userBalance: UserBalance = {
+            userId,
+            balances: {
+                "USDC": {
+                    id: `balance_${userId}_USDC`,
+                    userId,
+                    asset: "USDC",
+                    available: 0,
+                    locked: 0,
+                    total: 0,
+                    updated_at: Date.now()
+                }
+            }
+        };
+        state.userBalances.set(userId, userBalance);
+    }
+
+    const userBalance = state.userBalances.get(userId)!;
+    const usdcBalance = userBalance.balances["USDC"];
+
+    usdcBalance.available += amount;
+    usdcBalance.total += amount;
+    usdcBalance.updated_at = Date.now();
+
+    await persistUserBalance(userId);
+
+    return { success: true, balance: userBalance, error: "" }
+};
+
+
+
+
+//snapshoting 
+export const createSnapshot = async (): Promise<void> => {
+    if (!redis) {
+        console.error("Redis not initialized for snapshot");
+        return;
+    };
+    try {
+        const currentSnapshot = await redis.get({})
+    }
 }

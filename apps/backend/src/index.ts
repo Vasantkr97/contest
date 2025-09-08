@@ -3,7 +3,7 @@ import cookieParser from "cookie-parser"
 import "dotenv/config";
 import authRoutes from "./routes/auth.routes";
 import ordersRoutes from "./routes/order.routes"
-// import balanceRoutes from "./routes/balance.routes"
+import balanceRoutes from "./routes/balance.routes"
 
 const PORT = process.env.PORT || 3000;
 
@@ -19,7 +19,7 @@ app.get('/', (req, res) => {
 
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/orders", ordersRoutes)
-// app.use("api/v1/balance", balanceRoutes)
+app.use("/api/v1/balance", balanceRoutes)
 
 app.listen(PORT, () => {
     console.log(`Server is running on ${PORT}`)

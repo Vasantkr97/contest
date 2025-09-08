@@ -1,5 +1,5 @@
-export type OrderSide = 'buy' | 'sell';
-export type OrderStatus = 'successfull' | 'cancelled';
+export type OrderSide = 'BUY' | 'SELL';
+export type OrderStatus = 'SUCCESSFULL' | 'CANCELLED' | "CLOSED";
 
 export interface BackpackTickerData {
     symbol: string;

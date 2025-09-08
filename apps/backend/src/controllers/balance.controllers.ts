@@ -1,58 +1,88 @@
-// import { Request, Response } from "express";
+import { depositToUserBalance } from "@contest/engine/state/memory";
+import { Request, Response } from "express";
+import { getRedisClient, type RedisClientType } from "packages/redis/src";
 
-// export const getBalance = async (req: Request, res: Response): Promise<void> => {
-//     try {
-//         const { userId } = req.body;
+let redis: RedisClientType | null = null;
 
-//         if (!userId) {
-//             res.status(400).json({ error: "missing userId query parameter"});
-//         }
+(async () => {
+    redis = await getRedisClient();
+})();
 
-//         const userBalances = getUserBalances(userId);
+export const getBalance = async (req: Request, res: Response): Promise<void> => {
+    try {
+        console.log("reqquest from postman")
+        const { userId } = req.query;
 
-//         res.status(200).json({
-//             success: true,
-//             data: userBalances
-//         })
-//     } catch (error) {
-//         console.error("error getting userbalance:", error);
-//         res.status(500).json({error: "internal server error"});
-//     }
-// };
+        if (!userId) {
+            res.status(400).json({ error: "missing userId query parameter"});
+        }
 
-// export const depositBalance = async (req: Request, res: Response): Promise<void> {
-//     try {
-//         const { userId, amount } = req.body;
+        const key = `balance:${userId}`
+        const balanceData = await redis?.hGetAll(key);
 
-//         if (!userId || !amount) {
-//             res.status(400).json({ error: "missing required fields,"})
-//             return;
-//         }
+        if (!balanceData || Object.keys(balanceData).length === 0) {
+            res.status(404).json({
+                success: false,
+                error: "No balances found for this user",
+            });
+            return
+        }
 
-//         if (amount <= 0) {
-//             res.status(400).json({ error: "Amount must be greater than 0"});
-//             return;
-//         }
+        res.status(200).json({
+            success: true,
+            data: {
+                userId, 
+                balances: {
+                    USDC: {
+                        asset: balanceData.asset,
+                        available: parseFloat(balanceData.available),
+                        locked: parseFloat(balanceData.locked),
+                        total: parseFloat(balanceData.total),
+                        updated_at: Number(balanceData.updated_at)
+                    }
+                }
+            }
+        })
+    } catch (error) {
+        console.error("error getting userbalance:", error);
+        res.status(500).json({error: "internal server error"});
+    }
+};
 
-//         const result = depositBalance(userId, parseFloat(amount));
+export const depositBalance = async (req: Request, res: Response): Promise<void> => {
+    try {
+        console.log("request from postman for deposit")
+        const { userId, amount } = req.body;
 
-//         if (result.success) {
-//             res.status(200).json({
-//                 success: true,
-//                 data: result.balance,
-//                 message: "Deposit Successfull"
-//             })
-//         } else {
-//             res.status(400).json({
-//                 success:false,
-//                 error: result.error
-//             });
-//         }
-//     } catch (error) {
-//         console.error("error depositing balance", error);
-//         res.status(500).json({ error: "internal server error"})
-//     }
-// };
+        if (!userId || !amount) {
+            res.status(400).json({ error: "missing required fields,"})
+            return;
+        }
+
+        if (amount <= 0) {
+            res.status(400).json({ error: "Amount must be greater than 0"});
+            return;
+        }
+
+        const result = await depositToUserBalance(userId, parseFloat(amount));
+
+        if (result.success) {
+            res.status(200).json({
+                success: true,
+                data: result.balance,
+                message: "Deposit Successfull"
+            })
+        } else {
+            res.status(400).json({
+                success:false,
+                error: result.error
+            });
+        }
+    } catch (error) {
+        console.error("error depositing balance", error);
+        res.status(500).json({ error: "internal server error"})
+    }
+};
 
 // export const getAssetBalance = async (req: Request, res: Response): Promise<void> => {
 //     try {

@@ -1,12 +1,12 @@
-// import express from "express";
-// import { depositBalance, getAssetBalance, getBalance } from "../controllers/balance.controllers";
+import express from "express";
+import { depositBalance, getBalance } from "../controllers/balance.controllers";
 
-// const router = express.Router();
+const router = express.Router();
 
-// router.post('/', getBalance);
+router.get('/', getBalance);
 
-// router.post('/deposit', depositBalance);
+router.post('/deposit', depositBalance);
 
 // router.get('/:asset', getAssetBalance);
 
-// export default router;
+export default router;

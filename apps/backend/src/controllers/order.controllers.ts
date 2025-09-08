@@ -3,6 +3,7 @@ import { getRedisClient, type RedisClientType } from "@contest/redis-client"
 import { closeMessage, CONFIG, OrderMessage } from "packages/types/types";
 import {  waitForOrderConfirmation } from "../subscriber/consumer";
 import { randomUUID } from "crypto";
+import { state } from "@contest/engine";
 
 let redis: RedisClientType | null = null;
 
@@ -43,7 +44,7 @@ export const openOrder =async (req: Request, res: Response): Promise<void> => {
         console.log(`Order request sent with ID: ${OrderId}`)
 
         try {
-            const responseFromEngine = await waitForOrderConfirmation( OrderId, 5000);
+            const responseFromEngine = await waitForOrderConfirmation( OrderId, 7000);
             console.log("responses from engine",responseFromEngine)
             if (responseFromEngine) {
                 res.json({
@@ -122,6 +123,7 @@ export const closeOrder = async (req: Request, res: Response): Promise<void> => 
 
 export const getActiveOrders = async (req: Request, res: Response): Promise<void> => {
     try {
+        console.log("getting request from client")
         const { userId } = req.query;
 
         if (!userId) {
@@ -129,8 +131,14 @@ export const getActiveOrders = async (req: Request, res: Response): Promise<void
             return;
         };
 
-        // Not implemented yet
-        res.status(200).json({ success: true, data: [], count: 0 })
+        const activeOrders = Array.from(state.orders.values()).filter(order => 
+            order.userId === userId && order.status !== "CLOSED"
+        );
+        res.status(200).json({ 
+            success: true, 
+            data: activeOrders, 
+            count: activeOrders.length 
+        })
     } catch (error) {
         console.log("Error getting active orders:", error);
         res.status(500).json({ error: "Internal server error"})
