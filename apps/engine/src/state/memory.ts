@@ -16,7 +16,7 @@ export const state = {
 
 const SNAPSHOT_KEY = "engine:snapshot:latest";
 const SNAPSHOT_BACKUP_KEY = "engine:snapshot:backup";
-const SNAPsHOT_TTL = 300; 
+const SNAPSHOT_TTL = 300;
 
 const initializeRedis = async () => {
     redis = await getRedisClient();
@@ -175,8 +175,8 @@ export const closeOrderEngine = async ( data: {userId: string, OrderId: string},
     const order = state.orders.get(OrderId);
     if (!order) {
         console.log(`Order ${OrderId} not found for user ${userId}`)
-        if (!redis) {
-            await redis!.xAdd(CONFIG.CONSUMER_KEY, "*", {
+        if (redis) {
+            await redis.xAdd(CONFIG.CONSUMER_KEY, "*", {
                 data: JSON.stringify({
                     OrderId: closeRequestId,
                     userId,
@@ -314,6 +314,76 @@ export const createSnapshot = async (): Promise<void> => {
         return;
     };
     try {
-        const currentSnapshot = await redis.get({})
+        // Backup current snapshot before creating new one
+        const currentSnapshot = await redis.get(SNAPSHOT_KEY);
+        if (currentSnapshot) {
+            await redis.setEx(SNAPSHOT_BACKUP_KEY, SNAPSHOT_TTL, currentSnapshot);
+        }
+        
+        const snapshot = {
+            timestamp: Date.now(),
+            lastProcessedId: state.lastProcessedId,
+            orders: Array.from(state.orders.entries()),
+            balances: Array.from(state.userBalances.entries()),
+            prices: Array.from(state.prices.entries()),
+            userOrders: Array.from(state.userOrders.entries()).map(([userId, orderIds]) => [
+                userId,
+                Array.from(orderIds)
+            ]),
+            stats: {
+                orders: state.orders.size,
+                users: state.userBalances.size,
+                prices: state.prices.size,
+            }
+        };
+        console.log("snapshot",snapshot)
+        await redis.setEx(SNAPSHOT_KEY, SNAPSHOT_TTL, JSON.stringify(snapshot));
+        console.log(`Snapshot created - orders: ${snapshot.stats.orders}, Users: ${snapshot.stats.users}`);
+
+    } catch (error) {
+        console.error("Failed to create snapshot:", error);
+        throw error
+    }
+};
+
+export const restoreFromSnapshot = async (): Promise<boolean> => {
+    if (!redis) {
+        return false;
+    }
+
+    try {
+        let data = await redis.get(SNAPSHOT_KEY);
+        
+        if (!data) {
+            console.log('No primary snapshot found, trying backup...');
+            data = await redis.get(SNAPSHOT_BACKUP_KEY);
+            if (!data) {
+                console.log('No snapshot found');
+                return false;
+            }
+        }
+
+        const snapshot = JSON.parse(data);
+
+        state.orders = new Map(snapshot.orders);
+        state.userBalances = new Map(snapshot.balances);
+        state.prices = new Map(snapshot.prices);
+        state.lastProcessedId = snapshot.lastProcessedId || "$";
+        
+        //restore UserOrders
+        state.userOrders = new Map(
+            (snapshot.userOrders || []).map(([userId, orderIds]: [string, string[]]) => [
+                userId,
+                new Set(orderIds)
+            ])
+        );
+
+        console.log(`Restored from snapshot (ms old)`)
+        console.log(`   Orders: ${state.orders.size}, Users: ${state.userBalances.size}`);
+
+        return true;
+    } catch (error) {
+        console.error("failed to restore from snapshot:", error);
+        return false;
     }
 }

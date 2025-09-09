@@ -1,10 +1,12 @@
 import { getRedisClient, type RedisClientType } from "@contest/redis-client";
 import { CONFIG } from "@contest/types";
-import { closeOrderEngine, placeOrder, updatePriceData, state } from "./state/memory";
+import { closeOrderEngine, placeOrder, updatePriceData, state, restoreFromSnapshot, createSnapshot } from "./state/memory";
 
 let redis: RedisClientType ;
+let lastId = "$" //"$" this means only new messages when we start the engine again "0" means all from start
+export { state };
 let engineStartTime: number = Date.now();
-const STALE_ORDER_THRESHOLD = 5000;
+const STALE_ORDER_THRESHOLD = 30000; // 30 seconds
 
 
 const initializeRedis = async () => {
@@ -33,14 +35,11 @@ const initializeEngine = async () => {
 
 initializeEngine();
 
-let lastId = "$" //"$" this means only new messages when we start the engine again "0" means all from start
-
-export { state };
 
 export const startOrderConsumer = async (): Promise<void> => {
     console.log("starting order consumer...");
 
-    // creating periodic snapshot (every any seconds)
+    // creating periodic snapshot (every 30 seconds)
     const snapshotInterval = setInterval(async () => {
         try {
             await createSnapshot();
@@ -95,6 +94,7 @@ export const startOrderConsumer = async (): Promise<void> => {
             
             if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
                 console.error(`Too many consecutive errors (${MAX_CONSECUTIVE_ERRORS}), creating snapshot and exiting...`);
+                clearInterval(snapshotInterval);
                 await createSnapshot();
                 break;
             } 
@@ -119,11 +119,23 @@ const shouldSkipMessage = (message: any): boolean => {
         }
 
         if (messageType === "order_request" || messageType === "close_request") {
-            return isMessageTooOld(message.id, engineStartTime, STALE_ORDER_THRESHOLD)
+            return isMessageTooOld(message.id, STALE_ORDER_THRESHOLD)
         }
         return false;
     } catch (error) {
         console.log("Error checking message age:",error);
+        return true
+    }
+};
+
+
+const isMessageTooOld = (messageId: string, thresholdMS: number): boolean => {
+    try {
+        const messageTimestamp = parseInt(messageId.split('-')[0]);
+        const messageAge = Date.now() - messageTimestamp;
+
+        return messageAge > thresholdMS
+    } catch (error) {
         return true
     }
 }

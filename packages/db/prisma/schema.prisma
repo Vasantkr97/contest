@@ -15,7 +15,11 @@ datasource db {
 
 model User {
   id            String   @id @default(uuid())
-  userId        String   @unique
+  email         String   @unique
+  password      String
+  username      String   @unique
+
+  
   existingOrder    ExistingOrder[]
   createdAt     DateTime @default(now())
 }
@@ -45,7 +49,27 @@ model ExistingOrder {
   requiredMargin Float
   availableBalance Float
 
+  executedAt    DateTime  @default(now())
+  redisMessageId String?  //redis stream id that created this order
+
   createdAt     DateTime  @default(now())
+  @@index([redisMessageId])
+}
+
+model ExecutedMessage {
+  id              String           @id @default(uuid())
+  messageId       String           @unique
+  messageType     MessageType
+  orderId         String?
+  userId          String?
+  executedResult  ExecutionResult
+  executedAt      DateTime         @default(now())
+
+  messageData     Json?
+
+  @@index([messageId])
+  @@index([orderId])
+  @@index([userId])
 }
 
 enum Side {
@@ -56,4 +80,18 @@ enum Side {
 enum Status {
   SUCCESSFULL
   CANCELLED
+}
+
+enum MessageType {
+  ORDER_REQUEST
+  CLOSE_REQUEST
+  PRICE_UPDATE
+}
+
+enum ExecutionResult {
+  SUCCESS
+  FAILED
+  CANCELLED
+  STALE
+  DUPLICATE
 }

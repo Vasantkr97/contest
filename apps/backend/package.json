@@ -27,6 +27,6 @@
     "express": "^5.1.0",
     "nodemailer": "^7.0.6",
     "@contest/engine": "workspace:*",
-    "@contest/redis-client": "workspace:*",
+    "@contest/redis-client": "workspace:*"
   }
 }
